@@ -1,28 +1,27 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
-
 from aws_cdk import (
-    aws_ec2 as ec2,
-    aws_s3 as s3,
-    aws_ecs as ecs,
-    aws_rds as rds,
-    aws_iam as iam,
-    aws_secretsmanager as sm,
-    aws_ecs_patterns as ecs_patterns,
     App,
-    Stack,
-    CfnParameter,
-    CfnOutput,
     Aws,
-    RemovalPolicy,
+    CfnOutput,
+    CfnParameter,
     Duration,
+    RemovalPolicy,
+    Stack,
+    aws_ec2,
+    aws_ecs,
+    aws_ecs_patterns,
+    aws_iam,
+    aws_rds,
+    aws_s3,
+    aws_secretsmanager,
 )
 from constructs import Construct
 
 
 class MLflowStack(Stack):
-    def __init__(self, scope: Construct, id: str, **kwargs) -> None:
-        super().__init__(scope, id, **kwargs)
+    def __init__(self, scope: Construct, identification: str, **kwargs) -> None:
+        super().__init__(scope, identification, **kwargs)
         # ==============================
         # ======= CFN PARAMETERS =======
         # ==============================
@@ -38,59 +37,61 @@ class MLflowStack(Stack):
         # ==================================================
         # ================= IAM ROLE =======================
         # ==================================================
-        role = iam.Role(
+        role = aws_iam.Role(
             scope=self,
             id="TASKROLE",
-            assumed_by=iam.ServicePrincipal(service="ecs-tasks.amazonaws.com"),
+            assumed_by=aws_iam.ServicePrincipal(service="ecs-tasks.amazonaws.com"),
         )
         role.add_managed_policy(
-            iam.ManagedPolicy.from_aws_managed_policy_name("AmazonS3FullAccess")
+            aws_iam.ManagedPolicy.from_aws_managed_policy_name("AmazonS3FullAccess")
         )
         role.add_managed_policy(
-            iam.ManagedPolicy.from_aws_managed_policy_name("AmazonECS_FullAccess")
+            aws_iam.ManagedPolicy.from_aws_managed_policy_name("AmazonECS_FullAccess")
         )
 
         # ==================================================
         # ================== SECRET ========================
         # ==================================================
-        db_password_secret = sm.Secret(
+        s_string = aws_secretsmanager.SecretStringGenerator(
+            password_length=20,
+            exclude_punctuation=True
+        )
+        db_password_secret = aws_secretsmanager.Secret(
             scope=self,
             id="DBSECRET",
             secret_name="dbPassword",
-            generate_secret_string=sm.SecretStringGenerator(
-                password_length=20, exclude_punctuation=True
-            ),
+            generate_secret_string=s_string
         )
 
         # ==================================================
         # ==================== VPC =========================
         # ==================================================
-        public_subnet = ec2.SubnetConfiguration(
-            name="Public", subnet_type=ec2.SubnetType.PUBLIC, cidr_mask=28
+        public_subnet = aws_ec2.SubnetConfiguration(
+            name="Public", subnet_type=aws_ec2.SubnetType.PUBLIC, cidr_mask=28
         )
-        private_subnet = ec2.SubnetConfiguration(
-            name="Private", subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS, cidr_mask=28
+        private_subnet = aws_ec2.SubnetConfiguration(
+            name="Private", subnet_type=aws_ec2.SubnetType.PRIVATE_WITH_EGRESS, cidr_mask=28
         )
-        isolated_subnet = ec2.SubnetConfiguration(
-            name="DB", subnet_type=ec2.SubnetType.PRIVATE_ISOLATED, cidr_mask=28
+        isolated_subnet = aws_ec2.SubnetConfiguration(
+            name="DB", subnet_type=aws_ec2.SubnetType.PRIVATE_ISOLATED, cidr_mask=28
         )
 
-        vpc = ec2.Vpc(
+        vpc = aws_ec2.Vpc(
             scope=self,
             id="VPC",
-            ip_addresses=ec2.IpAddresses.cidr("10.0.0.0/24"),
+            ip_addresses=aws_ec2.IpAddresses.cidr("10.0.0.0/24"),
             max_azs=2,
-            nat_gateway_provider=ec2.NatProvider.gateway(),
+            nat_gateway_provider=aws_ec2.NatProvider.gateway(),
             nat_gateways=1,
             subnet_configuration=[public_subnet, private_subnet, isolated_subnet],
         )
         vpc.add_gateway_endpoint(
-            "S3Endpoint", service=ec2.GatewayVpcEndpointAwsService.S3
+            "S3Endpoint", service=aws_ec2.GatewayVpcEndpointAwsService.S3
         )
         # ==================================================
         # ================= S3 BUCKET ======================
         # ==================================================
-        artifact_bucket = s3.Bucket(
+        artifact_bucket = aws_s3.Bucket(
             scope=self,
             id="ARTIFACTBUCKET",
             bucket_name=bucket_name,
@@ -100,32 +101,32 @@ class MLflowStack(Stack):
         # # ================== DATABASE  =====================
         # # ==================================================
         # Creates a security group for AWS RDS
-        sg_rds = ec2.SecurityGroup(
+        sg_rds = aws_ec2.SecurityGroup(
             scope=self, id="SGRDS", vpc=vpc, security_group_name="sg_rds"
         )
         # Adds an ingress rule which allows resources in the VPC's CIDR to access the database.
         sg_rds.add_ingress_rule(
-            peer=ec2.Peer.ipv4("10.0.0.0/24"), connection=ec2.Port.tcp(port)
+            peer=aws_ec2.Peer.ipv4("10.0.0.0/24"), connection=aws_ec2.Port.tcp(port)
         )
 
-        database = rds.DatabaseInstance(
+        database = aws_rds.DatabaseInstance(
             scope=self,
             id="MYSQL",
             database_name=db_name,
             port=port,
-            credentials=rds.Credentials.from_username(
+            credentials=aws_rds.Credentials.from_username(
                 username=username, password=db_password_secret.secret_value
             ),
-            engine=rds.DatabaseInstanceEngine.mysql(
-                version=rds.MysqlEngineVersion.VER_8_0_34
+            engine=aws_rds.DatabaseInstanceEngine.mysql(
+                version=aws_rds.MysqlEngineVersion.VER_8_0_34()
             ),
-            instance_type=ec2.InstanceType.of(
-                ec2.InstanceClass.BURSTABLE2, ec2.InstanceSize.SMALL
+            instance_type=aws_ec2.InstanceType.of(
+                aws_ec2.InstanceClass.BURSTABLE2, aws_ec2.InstanceSize.SMALL
             ),
             vpc=vpc,
             security_groups=[sg_rds],
-            vpc_subnets=ec2.SubnetSelection(
-                subnet_type=ec2.SubnetType.PRIVATE_ISOLATED
+            vpc_subnets=aws_ec2.SubnetSelection(
+                subnet_type=aws_ec2.SubnetType.PRIVATE_ISOLATED
             ),
             # multi_az=True,
             removal_policy=RemovalPolicy.DESTROY,
@@ -134,11 +135,11 @@ class MLflowStack(Stack):
         # ==================================================
         # =============== FARGATE SERVICE ==================
         # ==================================================
-        cluster = ecs.Cluster(
+        cluster = aws_ecs.Cluster(
             scope=self, id="CLUSTER", cluster_name=cluster_name, vpc=vpc
         )
 
-        task_definition = ecs.FargateTaskDefinition(
+        task_definition = aws_ecs.FargateTaskDefinition(
             scope=self,
             id="MLflow",
             task_role=role,
@@ -148,7 +149,7 @@ class MLflowStack(Stack):
 
         container = task_definition.add_container(
             id="Container",
-            image=ecs.ContainerImage.from_asset(directory="container"),
+            image=aws_ecs.ContainerImage.from_asset(directory="container"),
             environment={
                 "BUCKET": f"s3://{artifact_bucket.bucket_name}",
                 "HOST": database.db_instance_endpoint_address,
@@ -156,15 +157,15 @@ class MLflowStack(Stack):
                 "DATABASE": db_name,
                 "USERNAME": username,
             },
-            secrets={"PASSWORD": ecs.Secret.from_secrets_manager(db_password_secret)},
-            logging=ecs.LogDriver.aws_logs(stream_prefix="mlflow"),
+            secrets={"PASSWORD": aws_ecs.Secret.from_secrets_manager(db_password_secret)},
+            logging=aws_ecs.LogDriver.aws_logs(stream_prefix="mlflow"),
         )
-        port_mapping = ecs.PortMapping(
-            container_port=5000, host_port=5000, protocol=ecs.Protocol.TCP
+        port_mapping = aws_ecs.PortMapping(
+            container_port=5000, host_port=5000, protocol=aws_ecs.Protocol.TCP
         )
         container.add_port_mappings(port_mapping)
 
-        fargate_service = ecs_patterns.NetworkLoadBalancedFargateService(
+        fargate_service = aws_ecs_patterns.NetworkLoadBalancedFargateService(
             scope=self,
             id="MLFLOW",
             service_name=service_name,
@@ -174,8 +175,8 @@ class MLflowStack(Stack):
 
         # Setup security group
         fargate_service.service.connections.security_groups[0].add_ingress_rule(
-            peer=ec2.Peer.ipv4(vpc.vpc_cidr_block),
-            connection=ec2.Port.tcp(5000),
+            peer=aws_ec2.Peer.ipv4(vpc.vpc_cidr_block),
+            connection=aws_ec2.Port.tcp(5000),
             description="Allow inbound from VPC for mlflow",
         )
 
@@ -197,6 +198,7 @@ class MLflowStack(Stack):
         )
 
 
-app = App()
-MLflowStack(app, "MLflowStack")
-app.synth()
+if __name__ == "__main__":
+    app = App()
+    MLflowStack(app, "MLflowStack")
+    app.synth()
